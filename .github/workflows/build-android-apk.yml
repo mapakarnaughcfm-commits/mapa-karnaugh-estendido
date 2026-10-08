@@ -1,0 +1,79 @@
+
+name: Gerar APK Android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Compilar e assinar APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Baixar codigo do aplicativo
+        uses: actions/checkout@v4
+        with:
+          ref: app-flutter-offline
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restaurar assinatura Android
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mapa-karnaugh-upload.jks"
+
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=mapa-karnaugh\nstoreFile=%s\n' \
+            "$ANDROID_KEYSTORE_PASSWORD" \
+            "$ANDROID_KEY_PASSWORD" \
+            "$RUNNER_TEMP/mapa-karnaugh-upload.jks" \
+            > mobile/android/key.properties
+
+      - name: Instalar dependencias Flutter
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Gerar APK atualizado
+        working-directory: mobile
+        env:
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_PUBLISHABLE_KEY"
+
+          flutter build apk --release \
+            --build-name=1.0.4 \
+            --build-number=5 \
+            --dart-define=SUPABASE_URL=https://eyxjfaowbwnpkzzqfzlf.supabase.co \
+            "--dart-define=SUPABASE_PUBLISHABLE_KEY=$SUPABASE_PUBLISHABLE_KEY" \
+            --dart-define=API_BASE_URL=https://mapa-karnaugh-estendido.onrender.com
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mapa-Karnaugh-Estendido-v1.0.4
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
